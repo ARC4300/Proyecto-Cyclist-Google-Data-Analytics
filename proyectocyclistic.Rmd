@@ -1,0 +1,451 @@
+---
+title: "Proyecto Cyclistic Google Data Analytics"
+author: "Adrian Reyes Cruz"
+date: "22/12/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)  
+```
+
+### **Sobre este proyecto**
+
+
+
+Los clientes con membresías anuales son más rentables para la empresa, por tal razón, el objetivo es convertir a los clientes ocasionales en socios anuales. Para ello, es necesario identificar en qué se diferencian los socios anuales y los clientes ocasionales, también sería necesario encontrar alguna razón por la que los ciclistas ocasionales podrían comprar la membresía y si es posible que los medios digitales persuadan a los ciclistas de convertirse en miembros.
+
+
+### **Obtención de los datos**
+
+Para realizar el análisis se obtuvieron conjuntos de datos provenientes de Motivate International Inc. descargados del siguiente enlace:
+[Link](https://divvy-tripdata.s3.amazonaws.com/index.html)
+
+Se recopilaron los datos correspondientes desde el mes de noviembre de 2021 hasta el mes de noviembre de 2022. Una vez descargados los datasets, en cada uno de ellos se añadieron un par de columnas: ride_length y day_of_week con ayuda de Excel, utilizando las funciones DIASEM() y utilizando la personalización de formatos. La primer columna nos indica la duración de los viajes en bicicleta registrados, mientras que la segunda columna nos indica el día en que ocurrió el viaje. Dichos datos ya procesados pueden encontrarse en el archivo "datos.zip" que puede descargarse en el siguiente enlace: [Link](https://drive.google.com/file/d/1w4N8Tfk07iyKlYbwqsUtmLKSH5yJJO07/view?usp=share_link)
+
+Las librerias que se emplearon en r fueron las siguientes: **tidyverse**, **lubridate**, **stringr**, **gdata**, **reshape2**.
+
+```{r, echo=FALSE, message= FALSE, warning=FALSE}
+# Importamos nuestras paqueterías
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(gdata)
+library(reshape2)
+```
+
+### **Limpieza y procesamiento de los datos**
+
+Para realizar el análisis de los datos utilizaremos RStudio para generar un archivo Rmd (RMarkdown) que será útil para generar este reporte con los hallazgos obtenidos.
+
+Una vez descargados los datos del archivos datos.zip, se juntaron los datasets de cada mes en un dataset único, y se procedió a realizar la eliminación de datos faltantes, los registros que carecían de estación de inicio y/o finalización del viaje fueron descartados al igual que aquellos viajes con duraciones menores a 30 segundos. En total, se trabajó con 4,617,077 registros.
+
+```{r, echo=FALSE, message= FALSE, warning=FALSE, results = FALSE}
+# Una vez que hemos extraído los archivos csv del documento datos.zip, 
+# cargamos nuestros datasets mensuales de la siguiente manera:
+temp = list.files(pattern="*.csv")
+for (i in 1:length(temp)) assign(temp[i], read.csv(temp[i]))
+
+# Posteriormente, los unimos en un único dataframe utilizando la función
+# rbind() para unirlos por filas.
+df <- rbind(`2021_11.csv`,`2021_12.csv`, `2022_01.csv`, `2022_02.csv`,
+            `2022_03.csv`, `2022_04.csv`, `2022_05.csv`, `2022_06.csv`,
+            `2022_07.csv`, `2022_08.csv`, `2022_09.csv`, `2022_10.csv`,
+            `2022_11.csv`)
+
+# Nuestro dataframe cuenta con 6093429 registros desde noviembre de 2021 hasta 
+# noviembre de 2022. Eliminamos las filas con datos nulos usando na.omit
+df <- na.omit(df)
+
+# Obtenemos 6087364 observaciones. Verifiquemos que ya no tengamos datos nulos
+# utilizando las funciones is.na() y sum()
+nulos <- sum(is.na(df))
+
+# También quitamos aquellos registros que carezcan de estación de inicio o final
+# del viaje.
+df <- df[!(df$start_station_name =="" | df$end_station_name ==""), ]
+
+# Observemos la duración del viaje más corto y  el viaje más largo.
+max <- max(df$ride_length)
+min <- min(df$ride_length)
+
+# Notamos un valor extraño en nuestros registros de duración de viaje dado por 
+# una cadena de numerales (#). Para quitarlos, nos encargaremos de que todos
+# nuestros registros de tiempo sean mayores o iguales a 00:00:00.
+df <- df[df$ride_length >= "00:00:00",]
+
+# Contemos cuántos viajes menores a 30 segundos tenemos:
+tiempo <- df$ride_length
+sum(tiempo < "00:00:30", na.rm=TRUE)
+
+# Tenemos 49049 registros menores a 30 segundos, por lo que procederemos a
+# remover dichos registros pues es poco probable que un viaje dure menos de
+# 30 segundos. Nos quedamos con un dataset con 4617077 observaciones.
+df <- df[df$ride_length >= "00:00:30",]
+```
+### **Análisis de los datos**
+
+Comencemos por visualizar qué proporción de los clientes son socios anuales y clientes ocasionales por medio de una pie chart.
+
+```{r, echo=FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_mem_soc <- df %>% 
+group_by(member_casual) %>%
+count() %>% 
+ungroup() %>% 
+mutate(perc = `n` / sum(`n`)) %>% 
+arrange(perc) %>%
+mutate(labels = scales::percent(perc))
+
+p1 <- (ggplot(df_mem_soc, aes(x = "", y = perc, fill = member_casual)) +
+           geom_col(color = "white", lwd =2) +
+           geom_label(aes(label = labels), color = 'white', size = 8, 
+                      position = position_stack(vjust = 0.5),
+                      show.legend = FALSE) + 
+           guides(fill = guide_legend(title = "Tipo de cliente")) +
+           coord_polar(theta = "y") + 
+           ggtitle("Proporción de viajes realizados por tipo de cliente") +
+           scale_fill_brewer(palette = "Pastel1") +
+           theme_void())
+
+p1 + theme(plot.title = element_text(color="black", size=14, face="bold", 
+                                     hjust = 0.5))
+```
+
+Como podemos notar, aproximadamente un 60% de los viajes son realizados por socios anuales y un 40% por clientes ocasionales.
+
+Ahora revisaremos cuál es el tipo de vehículo mayormente utilizado tanto por clientes ocasionales como los socios anuales.
+
+```{r, echo = FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_bici <- df %>% group_by(rideable_type,member_casual) %>% 
+    summarise(total=n(),.groups = 'drop') %>%
+    as.data.frame()
+# Como no hay registros de socios que hayan usado docked_bike, añadimos un registro
+# con 0 al dataframe.
+df_bici[nrow(df_bici) + 1,] <- c('docked_bici', 'member', 0) 
+df_bici <- df_bici[order(df_bici$rideable_type),]
+
+p2 <- ggplot(data=df_bici, aes(x=rideable_type, y=total, fill=member_casual)) +
+    geom_bar(stat="identity", position=position_dodge())+
+    geom_text(aes(label=total, fontface = 2), position = position_dodge(width = 1),
+              vjust=0, color="black", size=3.5, ) +
+    labs(x = "Tipo de bicicleta", y = "Viajes realizados") +
+    ggtitle("Cantidad de viajes por tipo de cliente y bicicleta") +
+    scale_fill_brewer(palette = "Pastel1")
+
+p2 + theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), 
+           axis.title = element_text(face="bold", size = 12), 
+           panel.background = element_rect(fill = "white", colour = "grey50"))
+
+```
+
+Podemos observar que las bicletas atracadas 'docked bikes' son utilizadas únicamente por clientes casuales y no por socios anuales. El tipo de bicicleta más utilizada por clientes casuales son las bicicletas electricas mientras que los socios utilizan preferentemente bicicletas clásicas.
+
+```{r, echo=FALSE}
+df_bici_soc_oca <- df %>% 
+    group_by(member_casual, rideable_type) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_bici_soc_oca = as.data.frame(df_bici_soc_oca)
+colnames(df_bici_soc_oca) <- c("Tipo de cliente", "Tipo de bicicleta", "Cantidad de viajes", "Proporción", "Porcentaje")
+```
+```{r, echo=FALSE}
+df_bici_soc_oca
+```
+
+Revisemos en qué días se realizan más viajes.
+
+```{r, echo=FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_dias <- df %>% group_by(day_of_week,member_casual) %>% 
+    summarise(total=n(),.groups = 'drop') %>%
+    as.data.frame()
+
+df_dias$day <- recode(df_dias$day_of_week,
+                      "1" = "Domingo",
+                      "2" = "Lunes",
+                      "3" = "Martes",
+                      "4" = "Miércoles",
+                      "5" = "Jueves",
+                      "6" = "Viernes",
+                      "7" = "Sábado")
+
+df_dias <- subset(df_dias, select = -day_of_week)
+
+p3 <- ggplot(data=df_dias, aes(x=day, y=total, fill=member_casual)) +
+    geom_bar(stat="identity", position=position_dodge())+
+    geom_text(aes(label=total, fontface = 2), position = position_dodge(width = 1),
+              vjust=0, color="black", size=3.5, ) +
+    labs(x = "Día", y = "Viajes realizados") +
+    ggtitle("Viajes realizados por día y tipo de cliente") +
+    scale_fill_brewer(palette = "Pastel1")
+
+p3 + theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), 
+           axis.title = element_text(face="bold", size = 12), 
+           panel.background = element_rect(fill = "white", colour = "grey50"))
+```
+
+Podemos notar que los días con mayor cantidad de viajes por parte de los clientes ocasionales son los fines de semana, viernes, sábado y domingo. Caso contrario de los socios que realizan más viajes entre semana,
+
+Lo siguiente que haremos será analizar la duración de los viajes realizados por ambos tipos de clientes.
+
+```{r, echo = FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_ocasional <- df[df$member_casual == 'casual',]
+df_socio <- df[df$member_casual == 'member',]
+
+tiempo_ocasional <- df_ocasional$ride_length
+tiempo_socio <- df_socio$ride_length
+
+#Convertimos los tiempos a segundos.
+tiempo_ocasional <- as.numeric(hms(tiempo_ocasional))
+tiempo_socio <- as.numeric(hms(tiempo_socio))
+
+#Convertimos los tiempos en segundos en horas.
+df_ocasional$hours <- tiempo_ocasional/3600
+df_socio$hours <- tiempo_socio/3600
+
+# Realizamos un par de histogramas con los tiempos de duración de los viajes.
+p4 <- ggplot(df_socio, aes(x=hours)) +
+    geom_histogram(color='olivedrab3', fill = 'forestgreen', bins = 96) +
+    scale_x_continuous(breaks = seq(0, 24, 2)) + 
+    labs(x = "Duración (horas)", y = "Número de viajes") +
+    ggtitle("Cantidad de viajes realizados por socios según su duración")
+
+p4 + theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), 
+           axis.title = element_text(face="bold", size = 12))
+
+p5 <- ggplot(df_ocasional, aes(x=hours)) +
+    geom_histogram(color='brown2', fill = 'red4', bins = 96) +
+    scale_x_continuous(breaks = seq(0, 24, 2)) + 
+    labs(x = "Duración (horas)", y = "Número de viajes") +
+    ggtitle("Cantidad de viajes realizados por clientes ocasionales según su duración")
+
+p5 + theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), 
+           axis.title = element_text(face="bold", size = 12))
+```
+
+En cuanto a los clientes ocasionales, notamos que hay una tendencia a que los viajes duren entre 15 y 30 minutos, mientras que, para los socios, existen múltiples registros de viajes de menos de 15 minutos, casi tantos como viajes de 15 a 30 minutos. Lo que podemos deducir es que, los clientes ocasionales suelen tener viajes con una duración mayor a la de los socios. 
+
+Ahora, echemos un vistazo a las horas más frecuentes tanto de comienzo de viaje, como de fin del viaje.
+
+```{r, echo=FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_socio$time <- str_sub(df_socio$started_at, -5,-1)
+df_ocasional$time <- str_sub(df_ocasional$started_at, -5, -1)
+df_socio$time <- paste0(df_socio$time, ":00")
+df_ocasional$time <- paste0(df_ocasional$time, ":00")
+
+df_temp_soc <- df_socio %>% 
+    group_by(time) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_temp_oca <- df_ocasional %>% 
+    group_by(time) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_temp_oca <- df_temp_oca[order(df_temp_oca$time),]
+df_temp_soc <- df_temp_soc[order(df_temp_oca$time),]
+
+aux1 = c()
+for (x in 1:length(df_temp_oca$time)){
+    tiempo = substr(df_temp_oca$time[x],1,2)
+    aux1 <- c(aux1, tiempo)}
+df_temp_oca$hour <- aux1
+
+aux2 = c()
+for (x in 1:length(df_temp_soc$time)){
+    tiempo = substr(df_temp_soc$time[x],1,2)
+    aux2 <- c(aux2, tiempo)}
+df_temp_soc$hour <- aux2
+
+df_temp_oca$hour <- as.integer(df_temp_oca$hour)
+df_temp_soc$hour <- as.integer(df_temp_soc$hour)
+
+df_toca <- df_temp_oca %>% group_by(hour) %>% 
+    summarise(suma_viajes = sum(n), .groups = 'drop') %>%
+    as.data.frame()
+
+df_soci <- df_temp_soc %>% group_by(hour) %>% 
+    summarise(suma_viajes = sum(n), .groups = 'drop') %>%
+    as.data.frame()
+
+df_combinado <- df_toca %>%  mutate(Tipo = 'Clientes Ocasionales') %>%
+    bind_rows(df_soci %>%
+    mutate(Tipo = 'Socios'))
+
+ggplot(df_combinado,aes(y = suma_viajes,x = hour,color = Tipo)) + 
+    geom_line(lwd =2) +
+    ggtitle("Viajes comenzados en cada hora según el tipo de cliente") +
+    labs(x = "Hora", y = "Número de viajes") +
+    scale_x_continuous(breaks = seq(0, 23, 1)) + 
+    theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), axis.title = element_text(face="bold", size = 12))
+```
+
+Podemos notar que la mayor parte de los viajes de los clientes ocasionales comienzan entre las 12 horas y las 17 horas. Mientras que en el caso de los socios, sus viajes comienzan en su mayoría entre las 6 y 8 horas y entre las 16 y 19 horas.
+
+Ahora analicemos las horas más comunes en que finalizan sus viajes:
+
+```{r, echo = FALSE, fig.align='center', fig.width=10, fig.height=6}
+df_socio$time <- str_sub(df_socio$ended_at, -5,-1)
+df_ocasional$time <- str_sub(df_ocasional$ended_at, -5, -1)
+df_socio$time <- paste0(df_socio$time, ":00")
+df_ocasional$time <- paste0(df_ocasional$time, ":00")
+
+df_temp_soc <- df_socio %>% 
+    group_by(time) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_temp_oca <- df_ocasional %>% 
+    group_by(time) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_temp_oca <- df_temp_oca[order(df_temp_oca$time),]
+df_temp_soc <- df_temp_soc[order(df_temp_oca$time),]
+
+aux1 = c()
+for (x in 1:length(df_temp_oca$time)){
+    tiempo = substr(df_temp_oca$time[x],1,2)
+    aux1 <- c(aux1, tiempo)}
+df_temp_oca$hour <- aux1
+
+aux2 = c()
+for (x in 1:length(df_temp_soc$time)){
+    tiempo = substr(df_temp_soc$time[x],1,2)
+    aux2 <- c(aux2, tiempo)}
+df_temp_soc$hour <- aux2
+
+df_temp_oca$hour <- as.integer(df_temp_oca$hour)
+df_temp_soc$hour <- as.integer(df_temp_soc$hour)
+
+df_toca <- df_temp_oca %>% group_by(hour) %>% 
+    summarise(suma_viajes = sum(n), .groups = 'drop') %>%
+    as.data.frame()
+
+df_soci <- df_temp_soc %>% group_by(hour) %>% 
+    summarise(suma_viajes = sum(n), .groups = 'drop') %>%
+    as.data.frame()
+
+df_combinado <- df_toca %>%  mutate(Tipo = 'Clientes Ocasionales') %>%
+    bind_rows(df_soci %>%
+                  mutate(Tipo = 'Socios'))
+
+ggplot(df_combinado,aes(y = suma_viajes,x = hour,color = Tipo)) + 
+    geom_line(lwd =2) +
+    ggtitle("Viajes finalizados en cada hora según el tipo de cliente") +
+    labs(x = "Hora", y = "Número de viajes") +
+    scale_x_continuous(breaks = seq(0, 23, 1)) + 
+    theme(plot.title = element_text(color="black", size=14, hjust = 0.5, face = "bold"), 
+          axis.title = element_text(face="bold", size = 12))
+```
+
+Dado que la mayoría de viajes duran entre 1 minuto y 30 minutos, podemos notar que la cantidad de viajes finalizados en cada hora es muy parecida a la cantidad de viajes comenzados.
+
+Lo siguiente que haremos será obtener los meses en que más viajes se realizan.
+
+```{r, echo=FALSE, fig.align='center', fig.width=10, fig.height=6}
+meses <- df
+meses$mes <- str_sub(meses$started_at, 4,5)
+meses$year <- str_sub(meses$started_at, 7,10)
+meses <- meses[meses$year > "2021", ]
+df_mes <- meses %>% 
+    group_by(mes, member_casual) %>%
+    count() %>% 
+    ungroup() %>% 
+    mutate(perc = `n` / sum(`n`)) %>% 
+    arrange(perc) %>%
+    mutate(labels = scales::percent(perc))
+
+df_mes <- df_mes[order(df_mes$mes),]
+
+p6 <- ggplot(data=df_mes, aes(x=mes, y=n, fill=member_casual)) +
+    geom_bar(stat="identity", position=position_dodge())+
+    geom_text(aes(label=n, fontface = 2), position = position_dodge(width = 1),
+              vjust=0, color="black", size=2, ) +
+    labs(x = "Meses", y = "Viajes realizados") +
+    ggtitle("Cantidad de viajes realizados por mes según el tipo de cliente (2022)") +
+    scale_fill_brewer(palette = "Pastel1")
+
+p6 + theme(plot.title = element_text(color="black", size=16, hjust = 0.5, face = "bold"), axis.title = element_text(face="bold", size = 12), panel.background = element_rect(fill = "white", colour = "grey50"))
+```
+
+Podemos notar que la mayor cantidad de viajes se realizan a mitad de año entre los meses de mayo y septiembre en el caso de los clientes ocasionales.
+
+Finalmente, revisemos cuáles son las estaciones más concurridas al iniciar y finalizar los viajes por parte de los clientes ocasionales que son nuestro objetivo.
+
+```{r, echo = FALSE}
+df_comienzo <- df_ocasional %>% 
+    group_by(start_station_name) %>%
+    count() %>% 
+    ungroup() %>% 
+    as.data.frame()
+
+colnames(df_comienzo) <- c("Nombre de la Estación", "Viajes")
+df_comienzo <- df_comienzo[order(df_comienzo$Viajes, decreasing = TRUE),]
+```
+```{r, echo = FALSE}
+head(df_comienzo, 20)
+```
+```{r, echo = FALSE}
+df_final <- df_ocasional %>% 
+    group_by(end_station_name) %>%
+    count() %>% 
+    ungroup() %>% 
+    as.data.frame()
+
+colnames(df_final) <- c("Nombre de la Estación", "Viajes")
+df_final <- df_final[order(df_final$Viajes, decreasing = TRUE),]
+```
+```{r, echo = FALSE}
+head(df_final, 20)
+```
+
+Podemos notar que hay estaciones en las que se registran más de 10000 viajes, destacando Streeter Dr & Grand Ave, Dusable Lake Shore Dr & Monroe St y Millenium Park por lo que al ser las más concurridas, serían los sitios adecuados para llegar a los clientes ocasionales.
+
+### **Hallazgos**
+
+* Aproximadamente el 40% de los viajes son realizados por clientes ocasionales, que es un porcentaje muy considerable y sería oportuno buscar que estos clientes adquieran la membresía anual.
+
+* Los clientes ocasionales en su mayoría utilizan las bicicletas clásicas, mientras que los socios utilizan en su mayoría bicicletas eléctricas.
+
+* Los clientes ocasionales registran la mayoría de sus viajes en fines de semana mientras que los socios utilizan las bicicletas principalmente entre semana.
+
+* La mayoría de los viajes tienen una duración menor a 30 minutos para ambos tipos de cliente.
+
+* Los clientes ocasionales suelen ser más activos entre las 12 y 17 horas, mientras que los socios presentan una alta actividad en dos periodos, de las 6 a las 8 horas y de las 16 a las 19 horas.
+
+* Los meses con más viajes de clientes ocasionales son junio, julio y agosto.
+
+* Las estaciones más concurridas por clientes ocasionales son: Streeter Dr & Grand Ave, DuSable Lake Shore Dr & Monroe St y Millennium Park.
+
+### **Recomendaciones**
+
+* Si la campaña gira entorno a entregar folletos o poner carteles, los puntos de mayor interés deben ser las estaciones más concurridas por los clientes ocasionales. Esto generará un amyor difusión de las membresías anuales.
+
+* Las campañas publicitarias deberán realizarse entre junio y agosto que son los meses en los que se realizan más viajes por parte de clientes ocasionales. Así mismo, es preferible concentrarse en los fines de semana, viernes, sábado y domingo y de preferencia hacerlo en horas posteriores a las 12 PM que son los días y horas con mayor actividad.
+
+* Si se utilizan medios digitales, podrían usarse imágenes atractivas de los viajes en bicicletas clásicas que suelen ser las más utilizadas por los clientes ocasionales.
+
+* Podrían realizarse encuestas para determinan los precios que los ciclistas están dispuestos a pagar, preguntar en qué contexto utilizan más las bicicletas, preguntar si encuentran alguna falla en el servicio de bicicletas compartidas para buscar como mejorarlo, y ofrecer descuentos o promociones por suscribirse por primera vez.
+
+
+
+
